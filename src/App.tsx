@@ -181,7 +181,7 @@ function App() {
                 Local-First Document Redaction
               </h1>
               <p className="text-slate-400 text-sm leading-relaxed">
-                VaultScan locates Personally Identifiable Information (PII) using multi-modal AI and enables secure quadrilateral perspective warping. Pixels inside active areas are permanently destroyed before archiving locally.
+                VaultScan locates sensitive information on your document and lets you crop and redact it securely. Selected areas are permanently erased before saving locally.
               </p>
             </div>
 
@@ -246,10 +246,10 @@ function App() {
                 <div className="flex flex-col gap-1.5">
                   <h4 className="font-bold text-xs flex items-center gap-2">
                     <ChevronRight className="w-4 h-4 text-violet-400 shrink-0" />
-                    How does the pixel destruction work?
+                    How does the secure erasing work?
                   </h4>
                   <p className="text-slate-400 text-xs pl-6 leading-relaxed">
-                    When you click "Burn & Secure", coordinates are mapped to a flat HTML5 canvas. We call <code>ctx.fillRect</code> directly over PII coordinate regions. The underlying raw pixel index values are replaced with flat colors permanently. Re-converting back to a JPEG completely breaks visual extraction, rendering pixel recovery mathematically impossible.
+                    When you click "Permanently Erase & Save", we permanently cover the selected areas with a solid color on the image itself. This completely destroys the underlying text so it can never be recovered.
                   </p>
                 </div>
 
@@ -259,17 +259,17 @@ function App() {
                     Where are the documents stored?
                   </h4>
                   <p className="text-slate-400 text-xs pl-6 leading-relaxed">
-                    We completely avoid <code>localStorage</code> due to its tiny 5MB limits. Documents are stored in browser **IndexedDB**, a powerful transactional object store that safely secures gigabytes of files in your profile container without leaks.
+                    Your documents are stored entirely in your browser's local secure database (IndexedDB). This keeps your data private on your own device and allows you to store larger files safely.
                   </p>
                 </div>
 
                 <div className="flex flex-col gap-1.5">
                   <h4 className="font-bold text-xs flex items-center gap-2">
                     <ChevronRight className="w-4 h-4 text-violet-400 shrink-0" />
-                    What runs the OCR scan?
+                    What runs the text scan?
                   </h4>
                   <p className="text-slate-400 text-xs pl-6 leading-relaxed">
-                    If configured via <code>.env.local</code>, VaultScan initializes our official cloud scanning engine to locate sensitive bounding rectangles (0-1000 scale) and return structured PII objects in real-time.
+                    VaultScan uses on-device text scanning inside your browser or native mobile system. The scan is performed entirely offline on your device, meaning your document is never sent to the cloud.
                   </p>
                 </div>
               </div>
