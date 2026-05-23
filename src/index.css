@@ -1,0 +1,71 @@
+@import "tailwindcss";
+
+@layer base {
+  body {
+    font-family: 'Inter', sans-serif;
+  }
+}
+
+/* Custom radial gradient decoration */
+.vibrant-gradient-vault {
+  background: radial-gradient(circle at 50% 50%, rgba(79, 70, 229, 0.25) 0%, rgba(124, 58, 237, 0.18) 35%, rgba(219, 39, 119, 0.08) 65%, #000000 100%);
+}
+
+.vibrant-gradient-vault-light {
+  background: radial-gradient(circle at 50% 50%, rgba(79, 70, 229, 0.08) 0%, rgba(124, 58, 237, 0.05) 40%, rgba(219, 39, 119, 0.02) 70%, #f2f2f7 100%);
+}
+
+/* Custom glassmorphism utilities */
+.glass-panel {
+  background: rgba(255, 255, 255, 0.03);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.glass-panel-light {
+  background: rgba(255, 255, 255, 0.7);
+  backdrop-filter: blur(24px) saturate(180%);
+  -webkit-backdrop-filter: blur(24px) saturate(180%);
+  border: 1px solid rgba(0, 0, 0, 0.06);
+}
+
+/* Spring animations and transitions */
+.spring-transition {
+  transition: all 0.4s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+}
+
+/* Custom scrollbars */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.1);
+  border-radius: 9999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+/* Redaction overlay bounding boxes */
+.bounding-box-glow {
+  box-shadow: 0 0 12px rgba(124, 58, 237, 0.4);
+}
+
+/* Custom animations */
+@keyframes pulseGlow {
+  0%, 100% {
+    opacity: 0.2;
+  }
+  50% {
+    opacity: 0.5;
+  }
+}
+
+.pulse-glow-bg {
+  animation: pulseGlow 4s infinite ease-in-out;
+}
