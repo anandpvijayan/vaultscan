@@ -239,7 +239,9 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
             {
               text: 'Scan this document image for Personally Identifiable Information (PII). ' +
                     'Identify names, addresses, emails, phone numbers, financial details, network IDs, and sensitive data. ' +
-                    'Provide bounding boxes for each PII element. Use a coordinate scale from 0 to 1000, where (0,0) is the top-left and (1000,1000) is the bottom-right.'
+                    'Provide bounding boxes for each PII element. Use a coordinate scale from 0 to 1000, where (0,0) is the top-left and (1000,1000) is the bottom-right. ' +
+                    'CRITICAL INSTRUCTION: The bounding boxes must wrap the sensitive PII text tightly. Do not offset or shift the coordinates. ' +
+                    'Cover ONLY the sensitive values themselves. Do NOT include static form labels (such as "FROM:", "BILL TO:", "SHIP TO:", "TOTAL:") or table headers in the bounding boxes. For example, if redacting a name next to "BILL TO", cover only the name itself, do not include the words "BILL TO".'
             }
           ],
           config: {
@@ -885,7 +887,7 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
                     transformOrigin: 'center center',
                     transition: isPanning || isDrawing ? 'none' : 'transform 0.15s ease-out'
                   }}
-                  className="relative max-w-full max-h-[550px] aspect-auto shadow-2xl border border-white/5 bg-slate-900"
+                  className="relative w-fit h-fit max-w-full max-h-[550px] aspect-auto shadow-2xl border border-white/5 bg-slate-900"
                 >
                   {/* Main Image element */}
                   <img
