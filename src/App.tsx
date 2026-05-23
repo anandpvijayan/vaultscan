@@ -117,7 +117,7 @@ function App() {
                   }`}
               >
                 <Sparkles className="w-4 h-4 text-violet-400" />
-                Scan Workspace
+                Erase Text
               </button>
               <button
                 onClick={() => setActiveTab('vault')}
@@ -128,7 +128,7 @@ function App() {
                   }`}
               >
                 <Database className="w-4 h-4 text-violet-400" />
-                Secure Vault
+                Saved Archive
                 <span className={`text-[10px] px-2 py-0.2 rounded-full font-mono font-bold
                   ${activeTab === 'vault' 
                     ? 'bg-violet-600 text-white' 
@@ -195,10 +195,10 @@ function App() {
           <div className="flex flex-col gap-8">
             <div className="flex flex-col gap-2">
               <h1 className={`text-4xl font-extrabold tracking-tight ${darkMode ? 'text-white' : 'text-slate-800'}`}>
-                Secure Bento Vault
+                Saved Documents
               </h1>
               <p className="text-slate-400 text-sm">
-                Explore the secure offline ledger. Read full metadata logs, retrieve side-by-side unredacted previews, and securely export cleaned document copies.
+                Explore your offline saved list. Compare original and erased documents, and download clean copies.
               </p>
             </div>
 
