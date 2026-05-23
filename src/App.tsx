@@ -266,10 +266,10 @@ function App() {
                 <div className="flex flex-col gap-1.5">
                   <h4 className="font-bold text-xs flex items-center gap-2">
                     <ChevronRight className="w-4 h-4 text-violet-400 shrink-0" />
-                    What AI Model runs the OCR scan?
+                    What runs the OCR scan?
                   </h4>
                   <p className="text-slate-400 text-xs pl-6 leading-relaxed">
-                    If configured via <code>.env.local</code>, VaultScan initializes the official <strong>@google/genai SDK</strong> client and utilizes <code>gemini-2.5-flash</code> to locate sensitive bounding rectangles (0-1000 scale) and return structured PII objects in real-time.
+                    If configured via <code>.env.local</code>, VaultScan initializes our official cloud scanning engine to locate sensitive bounding rectangles (0-1000 scale) and return structured PII objects in real-time.
                   </p>
                 </div>
               </div>

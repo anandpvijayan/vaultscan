@@ -117,12 +117,12 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
     if (!currentItem) return;
 
     setIsScanning(true);
-    setScanProgress('Initializing Gemini Client...');
+    setScanProgress('Initializing Engine...');
 
     try {
       if (isMockMode) {
         // High fidelity mock AI pipeline with latency simulation
-        setScanProgress('Uploading scan to AI Model (Mock Mode)...');
+        setScanProgress('Processing scan details (Demo Mode)...');
         await new Promise(r => setTimeout(r, 800));
         setScanProgress('OCR Reading Document pixels...');
         await new Promise(r => setTimeout(r, 600));
@@ -195,7 +195,7 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
 
       } else {
         // Genuine Gemini Client scan using @google/genai
-        setScanProgress('Analyzing document with Gemini 2.5 Flash...');
+        setScanProgress('Analyzing document details...');
         const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
         
         // Strip data:image/...;base64, prefix
@@ -765,7 +765,7 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
                 <div className="flex items-center gap-2">
                   <AlertTriangle className="w-4 h-4" />
                   <span>
-                    <strong>Mock Mode Active:</strong> No <code>GEMINI_API_KEY</code> detected in <code>.env.local</code>. Redaction pipeline will simulate PII coordinates.
+                    <strong>Demo Mode Active:</strong> No <code>GEMINI_API_KEY</code> detected in <code>.env.local</code>. Redaction pipeline will simulate sample coordinates for demonstration (which will not align exactly with your custom document's PII). Add your personal API Key to enable pixel-perfect redactions.
                   </span>
                 </div>
               </div>
@@ -1000,7 +1000,7 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
                           }`}
                       >
                         <Sparkles className="w-4 h-4" />
-                        {isScanning ? 'AI Engine Scanning...' : 'Scan with Gemini AI'}
+                        {isScanning ? 'Scanning...' : 'AI Scan'}
                       </button>
 
                       {/* Scan Status loader */}
