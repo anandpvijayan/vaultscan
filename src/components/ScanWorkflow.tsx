@@ -1,9 +1,9 @@
 import { useState, useRef, useEffect } from 'react';
 import { 
   Upload, FileText, Sparkles, RefreshCw, Crop, RotateCw, ZoomIn, ZoomOut, 
-  Hand, Shield, Trash2, Check, AlertCircle, AlertTriangle, Eye, EyeOff
+  Hand, Shield, Trash2, Check, AlertCircle, Eye, EyeOff, ShieldCheck
 } from 'lucide-react';
-import { GoogleGenAI } from '@google/genai';
+import { createWorker } from 'tesseract.js';
 import { PIIType } from '../types';
 import type { RedactionRegion, QueueItem, RedactedDocument } from '../types';
 
@@ -42,9 +42,49 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
 
   const currentItem = currentIndex >= 0 && currentIndex < queue.length ? queue[currentIndex] : null;
 
-  // Initializing Google GenAI Client
-  const GEMINI_API_KEY = process.env.GEMINI_API_KEY || '';
-  const isMockMode = !GEMINI_API_KEY;
+  // Detect platform bridges
+  const hasIOSBridge = !!(window as any).webkit?.messageHandlers?.scanDocument;
+  const hasAndroidBridge = !!(window as any).AndroidInterface?.scanDocument;
+
+  // Listen for native iOS / Android bridge coordinates
+  useEffect(() => {
+    (window as any).onNativeScanResult = (jsonString: string) => {
+      try {
+        const data = JSON.parse(jsonString);
+        if (data.regions && currentItem) {
+          const formattedRegions = data.regions.map((r: any, idx: number) => ({
+            id: `native-${idx}-${Math.random().toString(36).substring(2, 5)}`,
+            type: r.type as PIIType,
+            x: Math.max(0, Math.min(1000, r.x)),
+            y: Math.max(0, Math.min(1000, r.y)),
+            width: Math.max(1, Math.min(1000 - r.x, r.width)),
+            height: Math.max(1, Math.min(1000 - r.y, r.height)),
+            active: true,
+            label: r.label || ''
+          }));
+
+          setQueue(prev => {
+            const updated = [...prev];
+            updated[currentIndex] = {
+              ...updated[currentIndex],
+              regions: formattedRegions,
+              status: 'ready'
+            };
+            return updated;
+          });
+        }
+      } catch (err) {
+        console.error('Error parsing native bridge coordinates:', err);
+      } finally {
+        setIsScanning(false);
+        setScanProgress('');
+      }
+    };
+
+    return () => {
+      delete (window as any).onNativeScanResult;
+    };
+  }, [currentIndex, currentItem]);
 
   // Drag and drop events
   const handleDragOver = (e: React.DragEvent) => {
@@ -112,178 +152,295 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
     });
   };
 
-  // Execute Gemini AI OCR scanning
-  const runAIScan = async () => {
+  // Run Local WebAssembly Tesseract.js OCR inside the browser thread
+  const runLocalBrowserOCR = async () => {
     if (!currentItem) return;
 
-    setIsScanning(true);
-    setScanProgress('Initializing Engine...');
-
     try {
-      if (isMockMode) {
-        // High fidelity mock AI pipeline with latency simulation
-        setScanProgress('Processing scan details (Demo Mode)...');
-        await new Promise(r => setTimeout(r, 800));
-        setScanProgress('OCR Reading Document pixels...');
-        await new Promise(r => setTimeout(r, 600));
-        setScanProgress('Detecting sensitive PII patterns...');
-        await new Promise(r => setTimeout(r, 500));
+      setScanProgress('Initializing WebAssembly OCR Worker...');
+      const worker = await createWorker('eng');
 
-        // Simulated PII detection conforming to the schema
-        const mockRegions: RedactionRegion[] = [
-          {
-            id: 'mock-1',
-            type: PIIType.Name,
-            x: 120,
-            y: 140,
-            width: 250,
-            height: 40,
-            active: true,
-            label: 'Johnathan Archer'
-          },
-          {
-            id: 'mock-2',
+      setScanProgress('Analyzing document structures offline...');
+      const { data } = await worker.recognize(currentItem.originalImage);
+
+      setScanProgress('Isolating sensitive data patterns...');
+      const words = (data as any).words || [];
+
+      // Get image dimensions to compute tight bboxes
+      const img = new Image();
+      img.src = currentItem.originalImage;
+      await new Promise<void>((resolve) => {
+        img.onload = () => resolve();
+      });
+
+      const imgW = img.width || 1000;
+      const imgH = img.height || 1000;
+
+      const detectedRegions: RedactionRegion[] = [];
+
+      // Coordinate converter helper
+      const to1000 = (box: any) => {
+        const x = Math.max(0, Math.min(1000, Math.round((box.x0 / imgW) * 1000)));
+        const y = Math.max(0, Math.min(1000, Math.round((box.y0 / imgH) * 1000)));
+        const w = Math.max(1, Math.min(1000 - x, Math.round(((box.x1 - box.x0) / imgW) * 1000)));
+        const h = Math.max(1, Math.min(1000 - y, Math.round(((box.y1 - box.y0) / imgH) * 1000)));
+        return { x, y, width: w, height: h };
+      };
+
+      // Set to track processed words index
+      const processedIndices = new Set<number>();
+
+      // Heuristic lists
+      const blacklistWords = new Set([
+        'INVOICE', 'DATE', 'P.O.', 'TOTAL', 'BILL', 'SHIP', 'FROM', 'LOGO', 'QTY', 'DESCRIPTION', 'UNIT', 'PRICE', 'AMOUNT', 'SUBTOTAL', 'TAX', 'SALES', 'TERMS', 'CONDITIONS', 'P.O.#', 'INVOICE#', 'DUE'
+      ]);
+
+      // 1. Email Classifier (Single Word matching)
+      for (let i = 0; i < words.length; i++) {
+        const w = words[i];
+        const cleanText = w.text.trim();
+        if (cleanText.includes('@') || /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/.test(cleanText)) {
+          const coords = to1000(w.bbox);
+          detectedRegions.push({
+            id: `wasm-email-${i}`,
             type: PIIType.Email,
-            x: 120,
-            y: 195,
-            width: 280,
-            height: 35,
+            x: coords.x - 2,
+            y: coords.y - 2,
+            width: coords.width + 4,
+            height: coords.height + 4,
             active: true,
-            label: 'john.archer@starfleet.gov'
-          },
-          {
-            id: 'mock-3',
-            type: PIIType.Address,
-            x: 120,
-            y: 245,
-            width: 450,
-            height: 50,
-            active: true,
-            label: 'San Francisco Command Headquarters, CA 94129'
-          },
-          {
-            id: 'mock-4',
-            type: PIIType.Financial,
-            x: 480,
-            y: 620,
-            width: 380,
-            height: 40,
-            active: true,
-            label: 'ID: 4820-1928-3928-1102'
-          },
-          {
-            id: 'mock-5',
-            type: PIIType.Phone,
-            x: 120,
-            y: 310,
-            width: 210,
-            height: 35,
-            active: true,
-            label: '+1 (415) 555-0143'
-          }
-        ];
-
-        setQueue(prev => {
-          const updated = [...prev];
-          updated[currentIndex] = {
-            ...updated[currentIndex],
-            regions: mockRegions,
-            status: 'ready'
-          };
-          return updated;
-        });
-
-      } else {
-        // Genuine Gemini Client scan using @google/genai
-        setScanProgress('Analyzing document details...');
-        const ai = new GoogleGenAI({ apiKey: GEMINI_API_KEY });
-        
-        // Strip data:image/...;base64, prefix
-        const base64Raw = currentItem.originalImage.split(',')[1];
-        
-        const responseSchema = {
-          type: 'OBJECT',
-          properties: {
-            regions: {
-              type: 'ARRAY',
-              items: {
-                type: 'OBJECT',
-                properties: {
-                  type: {
-                    type: 'STRING',
-                    enum: ['Name', 'Address', 'Email', 'Phone Numbers', 'Financial Details', 'Network IDs', 'Sensitive Data'],
-                    description: 'The type of PII detected'
-                  },
-                  x: { type: 'INTEGER', description: 'X coordinate of bounding box, normalized from 0 to 1000' },
-                  y: { type: 'INTEGER', description: 'Y coordinate of bounding box, normalized from 0 to 1000' },
-                  width: { type: 'INTEGER', description: 'Width of bounding box, normalized from 0 to 1000' },
-                  height: { type: 'INTEGER', description: 'Height of bounding box, normalized from 0 to 1000' },
-                  label: { type: 'STRING', description: 'The exact PII text content found' }
-                },
-                required: ['type', 'x', 'y', 'width', 'height', 'label']
-              }
-            }
-          },
-          required: ['regions']
-        };
-
-        const response = await ai.models.generateContent({
-          model: 'gemini-2.5-flash',
-          contents: [
-            {
-              inlineData: {
-                mimeType: 'image/jpeg',
-                data: base64Raw
-              }
-            },
-            {
-              text: 'Scan this document image for Personally Identifiable Information (PII). ' +
-                    'Identify names, addresses, emails, phone numbers, financial details, network IDs, and sensitive data. ' +
-                    'Provide bounding boxes for each PII element. Use a coordinate scale from 0 to 1000, where (0,0) is the top-left and (1000,1000) is the bottom-right. ' +
-                    'CRITICAL INSTRUCTION: The bounding boxes must wrap the sensitive PII text tightly. Do not offset or shift the coordinates. ' +
-                    'Cover ONLY the sensitive values themselves. Do NOT include static form labels (such as "FROM:", "BILL TO:", "SHIP TO:", "TOTAL:") or table headers in the bounding boxes. For example, if redacting a name next to "BILL TO", cover only the name itself, do not include the words "BILL TO".'
-            }
-          ],
-          config: {
-            responseMimeType: 'application/json',
-            // Cast responseSchema to any to prevent strict typing mismatch with SDK internals
-            responseSchema: responseSchema as any
-          }
-        });
-
-        const textResponse = response.text;
-        if (!textResponse) throw new Error('Empty model output');
-        
-        const jsonResult = JSON.parse(textResponse);
-        const detectedRegions: RedactionRegion[] = (jsonResult.regions || []).map((r: any, idx: number) => ({
-          id: `auto-${idx}-${Math.random().toString(36).substring(2, 5)}`,
-          type: r.type as PIIType,
-          x: Math.max(0, Math.min(1000, r.x)),
-          y: Math.max(0, Math.min(1000, r.y)),
-          width: Math.max(1, Math.min(1000 - r.x, r.width)),
-          height: Math.max(1, Math.min(1000 - r.y, r.height)),
-          active: true,
-          label: r.label
-        }));
-
-        setQueue(prev => {
-          const updated = [...prev];
-          updated[currentIndex] = {
-            ...updated[currentIndex],
-            regions: detectedRegions,
-            status: 'ready'
-          };
-          return updated;
-        });
+            label: cleanText
+          });
+          processedIndices.add(i);
+        }
       }
+
+      // 2. Phone Numbers Classifier (Sequence matching 1-3 words)
+      for (let i = 0; i < words.length; i++) {
+        if (processedIndices.has(i)) continue;
+
+        // Try single word phone matching
+        const cleanText = words[i].text.trim();
+        const phoneRegex = /^\+?\(?\d{1,4}\)?[-.\s]?\d{3,4}[-.\s]?\d{4}$/;
+        
+        if (phoneRegex.test(cleanText) && cleanText.replace(/\D/g, '').length >= 7) {
+          const coords = to1000(words[i].bbox);
+          detectedRegions.push({
+            id: `wasm-phone-${i}`,
+            type: PIIType.Phone,
+            x: coords.x - 2,
+            y: coords.y - 2,
+            width: coords.width + 4,
+            height: coords.height + 4,
+            active: true,
+            label: cleanText
+          });
+          processedIndices.add(i);
+          continue;
+        }
+
+        // Try adjacent double word matching (e.g. "+1" "555-0143")
+        if (i < words.length - 1 && !processedIndices.has(i + 1)) {
+          const combinedText = `${words[i].text} ${words[i + 1].text}`.trim();
+          if (phoneRegex.test(combinedText.replace(/\s/g, '')) && combinedText.replace(/\D/g, '').length >= 7) {
+            const boxA = words[i].bbox;
+            const boxB = words[i + 1].bbox;
+            const combinedBox = {
+              x0: Math.min(boxA.x0, boxB.x0),
+              y0: Math.min(boxA.y0, boxB.y0),
+              x1: Math.max(boxA.x1, boxB.x1),
+              y1: Math.max(boxA.y1, boxB.y1)
+            };
+            const coords = to1000(combinedBox);
+            detectedRegions.push({
+              id: `wasm-phone-seq-${i}`,
+              type: PIIType.Phone,
+              x: coords.x - 2,
+              y: coords.y - 2,
+              width: coords.width + 4,
+              height: coords.height + 4,
+              active: true,
+              label: combinedText
+            });
+            processedIndices.add(i);
+            processedIndices.add(i + 1);
+          }
+        }
+      }
+
+      // 3. Address Classifier (Combining street coordinates: number + street name + suffix)
+      const streetSuffixes = new Set([
+        'STREET', 'LANE', 'DRIVE', 'AVENUE', 'COURT', 'SQUARE', 'ROAD', 'WAY', 'BOULEVARD', 'ST', 'LN', 'DR', 'AVE', 'CT', 'SQ', 'RD', 'BLVD'
+      ]);
+
+      for (let i = 2; i < words.length; i++) {
+        if (processedIndices.has(i)) continue;
+
+        const w = words[i];
+        const cleanSuffix = w.text.trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "").toUpperCase();
+
+        if (streetSuffixes.has(cleanSuffix)) {
+          // Verify preceding word is capitalized (street name) and word before that is a number (street number)
+          const midWord = words[i - 1];
+          const numWord = words[i - 2];
+          
+          if (!processedIndices.has(i - 1) && !processedIndices.has(i - 2)) {
+            const isMidCapitalized = /^[A-Z][a-zA-Z]+$/.test(midWord.text.trim());
+            const isNum = /^\d+[a-zA-Z]?$/.test(numWord.text.trim());
+
+            if (isMidCapitalized && isNum) {
+              const boxA = numWord.bbox;
+              const boxC = w.bbox;
+              const combinedBox = {
+                x0: Math.min(boxA.x0, boxC.x0),
+                y0: Math.min(boxA.y0, boxC.y0),
+                x1: Math.max(boxA.x1, boxC.x1),
+                y1: Math.max(boxA.y1, boxC.y1)
+              };
+
+              const coords = to1000(combinedBox);
+              const label = `${numWord.text} ${midWord.text} ${w.text}`;
+              detectedRegions.push({
+                id: `wasm-addr-street-${i}`,
+                type: PIIType.Address,
+                x: coords.x - 3,
+                y: coords.y - 3,
+                width: coords.width + 6,
+                height: coords.height + 6,
+                active: true,
+                label
+              });
+
+              processedIndices.add(i);
+              processedIndices.add(i - 1);
+              processedIndices.add(i - 2);
+
+              // Proactively look for trailing city, state, zip (e.g. New York, NY 12210) on the same line
+              if (i < words.length - 3 && !processedIndices.has(i + 1)) {
+                const nextW = words[i + 1];
+                const stateW = words[i + 2];
+                const zipW = words[i + 3];
+                
+                const isZip = /^\d{5}(-\d{4})?$/.test(zipW.text.trim());
+                if (isZip) {
+                  const zipBoxA = nextW.bbox;
+                  const zipBoxC = zipW.bbox;
+                  const zipCombinedBox = {
+                    x0: Math.min(zipBoxA.x0, zipBoxC.x0),
+                    y0: Math.min(zipBoxA.y0, zipBoxC.y0),
+                    x1: Math.max(zipBoxA.x1, zipBoxC.x1),
+                    y1: Math.max(zipBoxA.y1, zipBoxC.y1)
+                  };
+                  const zipCoords = to1000(zipCombinedBox);
+                  detectedRegions.push({
+                    id: `wasm-addr-zip-${i}`,
+                    type: PIIType.Address,
+                    x: zipCoords.x - 3,
+                    y: zipCoords.y - 3,
+                    width: zipCoords.width + 6,
+                    height: zipCoords.height + 6,
+                    active: true,
+                    label: `${nextW.text} ${stateW.text} ${zipW.text}`
+                  });
+                  processedIndices.add(i + 1);
+                  processedIndices.add(i + 2);
+                  processedIndices.add(i + 3);
+                }
+              }
+            }
+          }
+        }
+      }
+
+      // 4. Name Classifier (Capitalized adjacent words, excluding headers and system tags)
+      for (let i = 0; i < words.length - 1; i++) {
+        if (processedIndices.has(i) || processedIndices.has(i + 1)) continue;
+
+        const w1 = words[i];
+        const w2 = words[i + 1];
+
+        const t1 = w1.text.trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+        const t2 = w2.text.trim().replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, "");
+
+        const isCap1 = /^[A-Z][a-z]+$/.test(t1);
+        const isCap2 = /^[A-Z][a-z]+$/.test(t2);
+
+        const isBlacklisted1 = blacklistWords.has(t1.toUpperCase());
+        const isBlacklisted2 = blacklistWords.has(t2.toUpperCase());
+
+        if (isCap1 && isCap2 && !isBlacklisted1 && !isBlacklisted2) {
+          // Confirm they are closely positioned vertically (on the same text line)
+          const verticalDiff = Math.abs(w1.bbox.y0 - w2.bbox.y0);
+          if (verticalDiff < 15) {
+            const combinedBox = {
+              x0: Math.min(w1.bbox.x0, w2.bbox.x0),
+              y0: Math.min(w1.bbox.y0, w2.bbox.y0),
+              x1: Math.max(w1.bbox.x1, w2.bbox.x1),
+              y1: Math.max(w1.bbox.y1, w2.bbox.y1)
+            };
+
+            const coords = to1000(combinedBox);
+            detectedRegions.push({
+              id: `wasm-name-${i}`,
+              type: PIIType.Name,
+              x: coords.x - 3,
+              y: coords.y - 2,
+              width: coords.width + 6,
+              height: coords.height + 4,
+              active: true,
+              label: `${w1.text} ${w2.text}`
+            });
+
+            processedIndices.add(i);
+            processedIndices.add(i + 1);
+          }
+        }
+      }
+
+      // 5. Financial Classifier (USD / Total numbers)
+      for (let i = 0; i < words.length; i++) {
+        if (processedIndices.has(i)) continue;
+        const w = words[i];
+        const t = w.text.trim();
+        
+        // Match price tags or numeric credit codes
+        const creditCardRegex = /^\d{4}[-\s]?\d{4}[-\s]?\d{4}[-\s]?\d{4}$/;
+        if (creditCardRegex.test(t) || (/^\$\d+\.\d{2}$/.test(t) && i > 0 && words[i - 1].text.toUpperCase().includes('TOTAL'))) {
+          const coords = to1000(w.bbox);
+          detectedRegions.push({
+            id: `wasm-fin-${i}`,
+            type: PIIType.Financial,
+            x: coords.x - 2,
+            y: coords.y - 2,
+            width: coords.width + 4,
+            height: coords.height + 4,
+            active: true,
+            label: t
+          });
+          processedIndices.add(i);
+        }
+      }
+
+      await worker.terminate();
+
+      setQueue(prev => {
+        const updated = [...prev];
+        updated[currentIndex] = {
+          ...updated[currentIndex],
+          regions: detectedRegions,
+          status: 'ready'
+        };
+        return updated;
+      });
+
     } catch (err: any) {
-      console.error('Gemini Scanning failed:', err);
+      console.error('WASM OCR Processing failed:', err);
       setQueue(prev => {
         const updated = [...prev];
         updated[currentIndex] = {
           ...updated[currentIndex],
           status: 'error',
-          errorMessage: err.message || 'Verification scan failed'
+          errorMessage: 'Local OCR engine failed'
         };
         return updated;
       });
@@ -291,6 +448,31 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
       setIsScanning(false);
       setScanProgress('');
     }
+  };
+
+  // Main routing scan logic trigger
+  const runAIScan = async () => {
+    if (!currentItem) return;
+
+    setIsScanning(true);
+    setScanProgress('Initializing scanning engines...');
+
+    // 1. Route to iOS Bridge if WKWebView interface is detected
+    if ((window as any).webkit?.messageHandlers?.scanDocument) {
+      setScanProgress('Routing to iOS Native Vision Engine...');
+      (window as any).webkit.messageHandlers.scanDocument.postMessage(currentItem.originalImage);
+      return;
+    }
+
+    // 2. Route to Android Bridge if JavascriptInterface is detected
+    if ((window as any).AndroidInterface?.scanDocument) {
+      setScanProgress('Routing to Android ML Kit Engine...');
+      (window as any).AndroidInterface.scanDocument(currentItem.originalImage);
+      return;
+    }
+
+    // 3. Fallback to Local Browser WebAssembly OCR
+    await runLocalBrowserOCR();
   };
 
   // Perform Bilinear Warp perspective crop
@@ -761,17 +943,21 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
         </div>
         ) : (
           <div className={`rounded-3xl flex flex-col overflow-hidden ${darkMode ? 'glass-panel' : 'glass-panel-light'}`}>
-            {/* API Warning/Status Bar */}
-            {isMockMode && (
-              <div className="bg-amber-500/10 border-b border-amber-500/10 p-3 px-6 flex items-center justify-between text-xs text-amber-400">
-                <div className="flex items-center gap-2">
-                  <AlertTriangle className="w-4 h-4" />
-                  <span>
-                    <strong>Demo Mode Active:</strong> No <code>GEMINI_API_KEY</code> detected in <code>.env.local</code>. Redaction pipeline will simulate sample coordinates for demonstration (which will not align exactly with your custom document's PII). Add your personal API Key to enable pixel-perfect redactions.
-                  </span>
-                </div>
+            {/* Status bar: Displays active platform channel */}
+            <div className="bg-emerald-500/10 border-b border-emerald-500/15 p-3 px-6 flex items-center justify-between text-xs text-emerald-400">
+              <div className="flex items-center gap-2">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>
+                  {hasIOSBridge ? (
+                    <><strong>iOS Native Mode:</strong> Utilizing Apple Neural Engine hardware on-device.</>
+                  ) : hasAndroidBridge ? (
+                    <><strong>Android Native Mode:</strong> Utilizing Google ML Kit offline.</>
+                  ) : (
+                    <><strong>Browser Sandboxed Mode:</strong> Utilizing Local WebAssembly OCR (Tesseract.js). 100% offline, zero cloud data transfer.</>
+                  )}
+                </span>
               </div>
-            )}
+            </div>
 
             {/* Workspace Header Toolbar */}
             <div className="p-4 px-6 border-b border-white/5 flex flex-wrap gap-4 items-center justify-between bg-black/10">
@@ -995,11 +1181,7 @@ export const ScanWorkflow: React.FC<ScanWorkflowProps> = ({ darkMode, onArchive 
                       <button
                         onClick={runAIScan}
                         disabled={isScanning || currentItem.status === 'processing'}
-                        className={`w-full py-3 px-4 rounded-xl font-medium text-xs flex items-center justify-center gap-2 shadow-lg transition-all spring-transition
-                          ${isScanning
-                            ? 'bg-violet-600/30 text-violet-400 border border-violet-500/20 cursor-not-allowed'
-                            : 'bg-violet-600 text-white hover:bg-violet-500 hover:-translate-y-0.5 active:translate-y-0 border border-violet-500/40 shadow-violet-600/10'
-                          }`}
+                        className="w-full py-3 px-4 rounded-xl font-medium text-xs flex items-center justify-center gap-2 shadow-lg transition-all spring-transition bg-violet-600 text-white hover:bg-violet-500 hover:-translate-y-0.5 active:translate-y-0 border border-violet-500/40 shadow-violet-600/10"
                       >
                         <Sparkles className="w-4 h-4" />
                         {isScanning ? 'Scanning...' : 'AI Scan'}
